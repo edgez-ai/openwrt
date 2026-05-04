@@ -42,11 +42,44 @@ jobs:
         run: |
           ./scripts/morse_setup.sh -i -b ekh-mt76x8
 
+      - name: Restore OpenWrt toolchain cache
+        id: toolchain-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            staging_dir/toolchain-*
+            build_dir/toolchain-*
+          key: ${{ runner.os }}-ekh-mt76x8-toolchain-${{ hashFiles('.config', 'toolchain/**', 'include/toolchain-build.mk', 'include/version.mk') }}
+          restore-keys: |
+            ${{ runner.os }}-ekh-mt76x8-toolchain-
+
+      - name: Restore OpenWrt host tools cache
+        id: host-tools-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            staging_dir/host
+            staging_dir/hostpkg
+            build_dir/host
+            build_dir/hostpkg
+          key: ${{ runner.os }}-ekh-mt76x8-hosttools-${{ hashFiles('.config', 'tools/**', 'include/version.mk') }}
+          restore-keys: |
+            ${{ runner.os }}-ekh-mt76x8-hosttools-
+
       - name: Prepare build toolchain
         run: |
           make defconfig
-          make -j"$(nproc)" tools/install
-          make -j"$(nproc)" toolchain/install
+          if [ "${{ steps.host-tools-cache.outputs.cache-hit }}" != "true" ]; then
+            make -j"$(nproc)" tools/install
+          else
+            echo "Host tools cache hit: skipping tools/install"
+          fi
+
+          if [ "${{ steps.toolchain-cache.outputs.cache-hit }}" != "true" ]; then
+            make -j"$(nproc)" toolchain/install
+          else
+            echo "Toolchain cache hit: skipping toolchain/install"
+          fi
 
       - name: Build selected packages
         run: |
