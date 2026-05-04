@@ -117,13 +117,18 @@ jobs:
           set -euo pipefail
           make -j"$(nproc)" target/linux/compile
 
-          build_targets=(
-            package/network/services/hostapd/compile
-            package/feeds/morse/compile
-          )
-
           if [ ! -d package/feeds/morse ]; then
             echo "Morse feed directory missing: package/feeds/morse"
+            exit 1
+          fi
+
+          build_targets=()
+          while IFS= read -r pkgdir; do
+            build_targets+=("${pkgdir}/compile")
+          done < <(find package/feeds/morse -mindepth 1 -maxdepth 1 -type d | LC_ALL=C sort)
+
+          if [ "${#build_targets[@]}" -eq 0 ]; then
+            echo "No Morse feed package directories found under package/feeds/morse"
             exit 1
           fi
 
