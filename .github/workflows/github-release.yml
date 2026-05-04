@@ -1,4 +1,4 @@
-name: Create GitHub release
+name: Build Ekh-MT76x8 Packages and Release
 
 permissions:
   contents: write
@@ -8,6 +8,11 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish (for manual runs)"
+        required: true
+        type: string
 
 jobs:
   release:
@@ -16,9 +21,67 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref }}
+          fetch-depth: 0
 
-      - name: Release
+      - name: Resolve release tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if ! [[ "${{ github.event.inputs.tag }}" =~ ^v ]]; then
+              echo "Manual tag must start with 'v' (example: v2.9.0)"
+              exit 1
+            fi
+            echo "RELEASE_TAG=${{ github.event.inputs.tag }}" >> "$GITHUB_ENV"
+          else
+            echo "RELEASE_TAG=${GITHUB_REF_NAME}" >> "$GITHUB_ENV"
+          fi
+
+      - name: Install build dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y \
+            build-essential clang flex g++ gawk gcc-multilib git gettext \
+            libncurses5-dev libssl-dev python3-distutils rsync unzip zlib1g-dev swig
+
+      - name: Configure board ekh-mt76x8
+        run: |
+          ./scripts/morse_setup.sh -i -b ekh-mt76x8
+
+      - name: Build selected packages
+        run: |
+          make -j"$(nproc)" package/compile
+
+      - name: Bundle release assets
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+
+          # Feed and architecture packages (bin/packages/**)
+          if [ -d bin/packages ]; then
+            tar -C bin -czf release-assets/ekh-mt76x8-bin-packages.tar.gz packages
+          fi
+
+          # Target-specific kernel modules and target packages (bin/targets/**/packages)
+          target_dir="$(find bin/targets -mindepth 2 -maxdepth 2 -type d | head -n1)"
+          if [ -n "${target_dir}" ] && [ -d "${target_dir}/packages" ]; then
+            tar -C "${target_dir}" -czf release-assets/ekh-mt76x8-target-packages.tar.gz packages
+          fi
+
+          (cd release-assets && sha256sum *.tar.gz > sha256sums.txt)
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ekh-mt76x8-release-assets
+          path: release-assets/*
+
+      - name: Publish GitHub release assets
         uses: softprops/action-gh-release@v1
         with:
+          tag_name: ${{ env.RELEASE_TAG }}
           draft: true
           prerelease: true
+          files: |
+            release-assets/*.tar.gz
+            release-assets/sha256sums.txt
