@@ -9,8 +9,8 @@ on:
       - "v*"
   workflow_dispatch:
     inputs:
-      tag:
-        description: "Release tag to publish (for manual runs)"
+      branch:
+        description: "Branch to build (for manual runs)"
         required: true
         type: string
 
@@ -22,17 +22,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref }}
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/heads/{0}', github.event.inputs.branch) || github.ref }}
           fetch-depth: 0
 
       - name: Resolve release tag
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            if ! [[ "${{ github.event.inputs.tag }}" =~ ^v ]]; then
-              echo "Manual tag must start with 'v' (example: v2.9.0)"
+            if [ -z "${{ github.event.inputs.branch }}" ]; then
+              echo "Manual branch is required"
               exit 1
             fi
-            echo "RELEASE_TAG=${{ github.event.inputs.tag }}" >> "$GITHUB_ENV"
+            sanitized_branch="$(echo "${{ github.event.inputs.branch }}" | tr '/' '-' | tr ' ' '-')"
+            echo "RELEASE_TAG=manual-${sanitized_branch}-${{ github.run_number }}" >> "$GITHUB_ENV"
           else
             echo "RELEASE_TAG=${GITHUB_REF_NAME}" >> "$GITHUB_ENV"
           fi
