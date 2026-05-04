@@ -44,7 +44,7 @@ jobs:
 
       - name: Restore OpenWrt toolchain cache
         id: toolchain-cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: |
             staging_dir/toolchain-*
@@ -55,7 +55,7 @@ jobs:
 
       - name: Restore OpenWrt host tools cache
         id: host-tools-cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: |
             staging_dir/host
@@ -80,6 +80,26 @@ jobs:
           else
             echo "Toolchain cache hit: skipping toolchain/install"
           fi
+
+      - name: Save OpenWrt host tools cache
+        if: always() && steps.host-tools-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            staging_dir/host
+            staging_dir/hostpkg
+            build_dir/host
+            build_dir/hostpkg
+          key: ${{ steps.host-tools-cache.outputs.cache-primary-key }}
+
+      - name: Save OpenWrt toolchain cache
+        if: always() && steps.toolchain-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            staging_dir/toolchain-*
+            build_dir/toolchain-*
+          key: ${{ steps.toolchain-cache.outputs.cache-primary-key }}
 
       - name: Build selected packages
         run: |
