@@ -44,12 +44,33 @@ jobs:
 
       - name: Ensure Morse feed is installed
         run: |
-          set -e
+          set -euo pipefail
           ./scripts/feeds update morse
           ./scripts/feeds install -f -p morse -a
 
+          if [ ! -d feeds/morse ]; then
+            echo "Morse feed source directory missing: feeds/morse"
+            exit 1
+          fi
+
+          morse_pkg_count="$(find package/feeds/morse -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l | tr -d ' ')"
+          if [ "${morse_pkg_count}" = "0" ]; then
+            echo "No Morse packages installed yet, installing from feeds/morse package list"
+            find feeds/morse -mindepth 1 -maxdepth 1 -type d -exec test -f '{}/Makefile' ';' -print \
+              | xargs -r -n1 basename \
+              | while IFS= read -r pkg; do
+                  ./scripts/feeds install -f -p morse "${pkg}"
+                done
+          fi
+
           if [ ! -d package/feeds/morse ]; then
             echo "Morse feed packages were not installed into package/feeds/morse"
+            exit 1
+          fi
+
+          morse_pkg_count="$(find package/feeds/morse -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')"
+          if [ "${morse_pkg_count}" = "0" ]; then
+            echo "Morse feed directory exists but has no package entries"
             exit 1
           fi
 
