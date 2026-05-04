@@ -104,8 +104,10 @@ jobs:
       - name: Build selected packages
         run: |
           set -e
+          make -j"$(nproc)" target/linux/compile
           if ! make -j"$(nproc)" package/compile; then
             echo "Parallel package build failed, retrying with verbose output"
+            make -j1 target/linux/compile V=s 2>&1 | tee target-linux-compile.log
             make -j1 package/compile V=s 2>&1 | tee package-compile.log
             exit 1
           fi
@@ -140,6 +142,7 @@ jobs:
         with:
           name: ekh-mt76x8-build-logs
           path: |
+            target-linux-compile.log
             package-compile.log
             logs/**
 
