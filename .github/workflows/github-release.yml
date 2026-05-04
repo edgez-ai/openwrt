@@ -16,7 +16,7 @@ on:
 
 jobs:
   release:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     steps:
       - name: Checkout
@@ -42,11 +42,6 @@ jobs:
           sudo apt update
           PKGS="build-essential clang flex g++ gawk gcc-multilib git gettext \
             libncurses5-dev libssl-dev python3 python3-setuptools rsync unzip zlib1g-dev swig"
-
-          # python3-distutils was removed from newer Ubuntu releases (e.g. 24.04).
-          if apt-cache show python3-distutils >/dev/null 2>&1; then
-            PKGS="$PKGS python3-distutils"
-          fi
 
           sudo apt install -y $PKGS
 
