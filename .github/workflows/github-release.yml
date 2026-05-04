@@ -42,6 +42,17 @@ jobs:
         run: |
           ./scripts/morse_setup.sh -i -b ekh-mt76x8
 
+      - name: Ensure Morse feed is installed
+        run: |
+          set -e
+          ./scripts/feeds update morse
+          ./scripts/feeds install -f -p morse -a
+
+          if [ ! -d package/feeds/morse ]; then
+            echo "Morse feed packages were not installed into package/feeds/morse"
+            exit 1
+          fi
+
       - name: Restore OpenWrt toolchain cache
         id: toolchain-cache
         uses: actions/cache/restore@v4
@@ -108,16 +119,11 @@ jobs:
 
           build_targets=(
             package/network/services/hostapd/compile
+            package/feeds/morse/compile
           )
 
-          if [ -d package/feeds/morse ]; then
-            while IFS= read -r pkgdir; do
-              build_targets+=("${pkgdir}/compile")
-            done < <(find package/feeds/morse -mindepth 1 -maxdepth 1 -type d | LC_ALL=C sort)
-          fi
-
-          if [ "${#build_targets[@]}" -eq 0 ]; then
-            echo "No Morse or wpa-supplicant related package targets found"
+          if [ ! -d package/feeds/morse ]; then
+            echo "Morse feed directory missing: package/feeds/morse"
             exit 1
           fi
 
