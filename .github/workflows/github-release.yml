@@ -53,12 +53,13 @@ jobs:
             exit 1
           fi
 
-          morse_pkg_count="$(find package/feeds/morse -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l | tr -d ' ')"
+          morse_pkg_count="$(find package/feeds/morse -mindepth 1 -maxdepth 1 \( -type d -o -type l \) 2>/dev/null | wc -l | tr -d ' ')"
           if [ "${morse_pkg_count}" = "0" ]; then
-            echo "No Morse packages installed yet, installing from feeds/morse package list"
-            find feeds/morse -mindepth 1 -maxdepth 1 -type d -exec test -f '{}/Makefile' ';' -print \
-              | xargs -r -n1 basename \
+            echo "No Morse packages installed yet, installing from Morse feed index"
+            ./scripts/feeds list -r morse \
+              | awk '$1 != "TARGET:" { print $1 }' \
               | while IFS= read -r pkg; do
+                  [ -n "${pkg}" ] || continue
                   ./scripts/feeds install -f -p morse "${pkg}"
                 done
           fi
@@ -68,7 +69,7 @@ jobs:
             exit 1
           fi
 
-          morse_pkg_count="$(find package/feeds/morse -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')"
+          morse_pkg_count="$(find package/feeds/morse -mindepth 1 -maxdepth 1 \( -type d -o -type l \) | wc -l | tr -d ' ')"
           if [ "${morse_pkg_count}" = "0" ]; then
             echo "Morse feed directory exists but has no package entries"
             exit 1
@@ -146,7 +147,7 @@ jobs:
           build_targets=()
           while IFS= read -r pkgdir; do
             build_targets+=("${pkgdir}/compile")
-          done < <(find package/feeds/morse -mindepth 1 -maxdepth 1 -type d | LC_ALL=C sort)
+          done < <(find package/feeds/morse -mindepth 1 -maxdepth 1 \( -type d -o -type l \) | LC_ALL=C sort)
 
           if [ "${#build_targets[@]}" -eq 0 ]; then
             echo "No Morse feed package directories found under package/feeds/morse"
