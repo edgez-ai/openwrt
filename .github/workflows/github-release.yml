@@ -41,7 +41,8 @@ jobs:
         run: |
           sudo apt update
           PKGS="build-essential clang flex g++ gawk gcc-multilib git gettext \
-            libncurses5-dev libssl-dev python3 python3-setuptools rsync unzip zlib1g-dev swig"
+            file wget xz-utils libelf-dev libzstd-dev libncurses5-dev libncursesw5-dev \
+            libssl-dev python3 python3-setuptools rsync unzip zlib1g-dev swig"
 
           sudo apt install -y $PKGS
 
@@ -49,9 +50,20 @@ jobs:
         run: |
           ./scripts/morse_setup.sh -i -b ekh-mt76x8
 
+      - name: Prepare build toolchain
+        run: |
+          make defconfig
+          make -j"$(nproc)" tools/install
+          make -j"$(nproc)" toolchain/install
+
       - name: Build selected packages
         run: |
-          make -j"$(nproc)" package/compile
+          set -e
+          if ! make -j"$(nproc)" package/compile; then
+            echo "Parallel package build failed, retrying with verbose output"
+            make -j1 package/compile V=s 2>&1 | tee package-compile.log
+            exit 1
+          fi
 
       - name: Bundle release assets
         run: |
@@ -76,6 +88,15 @@ jobs:
         with:
           name: ekh-mt76x8-release-assets
           path: release-assets/*
+
+      - name: Upload build logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ekh-mt76x8-build-logs
+          path: |
+            package-compile.log
+            logs/**
 
       - name: Publish GitHub release assets
         uses: softprops/action-gh-release@v1
