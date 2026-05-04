@@ -103,12 +103,31 @@ jobs:
 
       - name: Build selected packages
         run: |
-          set -e
+          set -euo pipefail
           make -j"$(nproc)" target/linux/compile
-          if ! make -j"$(nproc)" package/compile; then
-            echo "Parallel package build failed, retrying with verbose output"
+
+          build_targets=(
+            package/network/services/hostapd/compile
+          )
+
+          if [ -d package/feeds/morse ]; then
+            while IFS= read -r pkgdir; do
+              build_targets+=("${pkgdir}/compile")
+            done < <(find package/feeds/morse -mindepth 1 -maxdepth 1 -type d | LC_ALL=C sort)
+          fi
+
+          if [ "${#build_targets[@]}" -eq 0 ]; then
+            echo "No Morse or wpa-supplicant related package targets found"
+            exit 1
+          fi
+
+          echo "Building package targets:"
+          printf ' - %s\n' "${build_targets[@]}"
+
+          if ! make -j"$(nproc)" "${build_targets[@]}"; then
+            echo "Parallel selected package build failed, retrying with verbose output"
             make -j1 target/linux/compile V=s 2>&1 | tee target-linux-compile.log
-            make -j1 package/compile V=s 2>&1 | tee package-compile.log
+            make -j1 "${build_targets[@]}" V=s 2>&1 | tee package-compile.log
             exit 1
           fi
 
