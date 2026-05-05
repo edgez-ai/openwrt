@@ -144,24 +144,70 @@ jobs:
             exit 1
           fi
 
+          # Morse feed packages to build (package names under package/feeds/morse).
+          # Customize this list as needed.
+          morse_build_packages=(
+            hostapd_s1g
+            wpa_supplicant_s1g
+          )
+
           build_targets=()
-          while IFS= read -r pkgdir; do
+          for pkg in "${morse_build_packages[@]}"; do
+            pkgdir="package/feeds/morse/${pkg}"
+            if [ ! -e "${pkgdir}" ]; then
+              echo "Requested Morse package missing: ${pkgdir}"
+              exit 1
+            fi
             build_targets+=("${pkgdir}/compile")
-          done < <(find package/feeds/morse -mindepth 1 -maxdepth 1 \( -type d -o -type l \) | LC_ALL=C sort)
+          done
 
           if [ "${#build_targets[@]}" -eq 0 ]; then
-            echo "No Morse feed package directories found under package/feeds/morse"
+            echo "No selected Morse package targets to build"
             exit 1
           fi
 
           echo "Building package targets:"
           printf ' - %s\n' "${build_targets[@]}"
 
-          if ! make -j"$(nproc)" "${build_targets[@]}"; then
-            echo "Parallel selected package build failed, retrying with verbose output"
-            make -j1 target/linux/compile V=s 2>&1 | tee target-linux-compile.log
-            make -j1 "${build_targets[@]}" V=s 2>&1 | tee package-compile.log
+          mkdir -p logs/morse
+          : > logs/morse/succeeded.txt
+          : > logs/morse/failed.txt
+
+          for target in "${build_targets[@]}"; do
+            pkg_name="$(basename "$(dirname "${target}")")"
+            log_file="logs/morse/${pkg_name}.log"
+            echo "=== Building ${target} ==="
+
+            if make -j"$(nproc)" "${target}" >"${log_file}" 2>&1; then
+              echo "${target}" | tee -a logs/morse/succeeded.txt
+            else
+              echo "${target}" | tee -a logs/morse/failed.txt
+              echo "Build failed for ${target}, skipping and continuing"
+            fi
+          done
+
+          succeeded_count="$(wc -l < logs/morse/succeeded.txt | tr -d ' ')"
+          failed_count="$(wc -l < logs/morse/failed.txt | tr -d ' ')"
+
+          {
+            echo "Morse package build summary"
+            echo "Succeeded: ${succeeded_count}"
+            echo "Failed: ${failed_count}"
+            echo
+            echo "Succeeded targets:"
+            cat logs/morse/succeeded.txt
+            echo
+            echo "Failed targets:"
+            cat logs/morse/failed.txt
+          } | tee logs/morse/summary.txt
+
+          if [ "${succeeded_count}" = "0" ]; then
+            echo "No Morse package built successfully"
             exit 1
+          fi
+
+          if [ "${failed_count}" != "0" ]; then
+            echo "Some Morse packages failed, continuing with successful packages only"
           fi
 
       - name: Bundle release assets
@@ -180,7 +226,11 @@ jobs:
             tar -C "${target_dir}" -czf release-assets/ekh-mt76x8-target-packages.tar.gz packages
           fi
 
-          (cd release-assets && sha256sum *.tar.gz > sha256sums.txt)
+          if ls release-assets/*.tar.gz >/dev/null 2>&1; then
+            (cd release-assets && sha256sum *.tar.gz > sha256sums.txt)
+          else
+            echo "No package tarballs were created" > release-assets/sha256sums.txt
+          fi
 
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v4
@@ -188,14 +238,15 @@ jobs:
           name: ekh-mt76x8-release-assets
           path: release-assets/*
 
-      - name: Upload build logs on failure
-        if: failure()
+      - name: Upload build logs
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: ekh-mt76x8-build-logs
           path: |
             target-linux-compile.log
             package-compile.log
+            logs/morse/**
             logs/**
 
       - name: Publish GitHub release assets
