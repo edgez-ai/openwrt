@@ -46,11 +46,22 @@ jobs:
         run: |
           set -euo pipefail
           ./scripts/feeds update morse
-          ./scripts/feeds install -f -p morse hostapd_s1g wpa_supplicant_s1g
+          ./scripts/feeds install -f -p morse -a
 
           if [ ! -d feeds/morse ]; then
             echo "Morse feed source directory missing: feeds/morse"
             exit 1
+          fi
+
+          morse_pkg_count="$(find package/feeds/morse -mindepth 1 -maxdepth 1 \( -type d -o -type l \) 2>/dev/null | wc -l | tr -d ' ')"
+          if [ "${morse_pkg_count}" = "0" ]; then
+            echo "No Morse packages installed yet, installing from Morse feed index"
+            ./scripts/feeds list -r morse \
+              | awk '$1 != "TARGET:" { print $1 }' \
+              | while IFS= read -r pkg; do
+                  [ -n "${pkg}" ] || continue
+                  ./scripts/feeds install -f -p morse "${pkg}"
+                done
           fi
 
           if [ ! -d package/feeds/morse ]; then
@@ -58,105 +69,9 @@ jobs:
             exit 1
           fi
 
-          for pkg in hostapd_s1g wpa_supplicant_s1g; do
-            if [ ! -e "package/feeds/morse/${pkg}" ]; then
-              echo "Required Morse package missing after install: package/feeds/morse/${pkg}"
-              exit 1
-            fi
-          done
-
-      - name: Limit Morse package selection to requested packages
-        run: |
-          set -euo pipefail
-
-          keep_packages=(
-            hostapd_s1g
-            wpa_supplicant_s1g
-          )
-
-          # These can be selected by board defaults or package dependencies
-          # when building the requested packages.
-          allowed_auto_selected_packages=(
-            libwpa_client_s1g
-            mediamtx
-            morsecli
-            smart_manager
-          )
-
-          morse_packages_file="$(mktemp)"
-          ./scripts/feeds list -r morse \
-            | awk '$1 != "TARGET:" { print $1 }' \
-            | sed '/^$/d' > "${morse_packages_file}"
-
-          while IFS= read -r pkg; do
-            cfg_sym="$(echo "${pkg}" | tr '-' '_')"
-            # Remove any existing assignment before writing a deterministic value below.
-            sed -i "/^CONFIG_PACKAGE_${cfg_sym}=.*/d" .config
-            sed -i "/^# CONFIG_PACKAGE_${cfg_sym} is not set$/d" .config
-          done < "${morse_packages_file}"
-
-          while IFS= read -r pkg; do
-            skip=false
-            for keep in "${keep_packages[@]}"; do
-              if [ "${pkg}" = "${keep}" ]; then
-                skip=true
-                break
-              fi
-            done
-
-            cfg_sym="$(echo "${pkg}" | tr '-' '_')"
-            if [ "${skip}" = true ]; then
-              echo "CONFIG_PACKAGE_${cfg_sym}=y" >> .config
-            else
-              echo "# CONFIG_PACKAGE_${cfg_sym} is not set" >> .config
-            fi
-          done < "${morse_packages_file}"
-
-          make defconfig
-
-          rm -f "${morse_packages_file}"
-
-          for pkg in "${keep_packages[@]}"; do
-            cfg_sym="$(echo "${pkg}" | tr '-' '_')"
-            if ! grep -q "^CONFIG_PACKAGE_${cfg_sym}=y$" .config; then
-              echo "Expected package selection missing in .config: CONFIG_PACKAGE_${cfg_sym}=y"
-              exit 1
-            fi
-          done
-
-          extra_morse_selected="$(./scripts/feeds list -r morse \
-            | awk '$1 != "TARGET:" { print $1 }' \
-            | while IFS= read -r pkg; do
-                cfg_sym="$(echo "${pkg}" | tr '-' '_')"
-                if ! grep -q "^CONFIG_PACKAGE_${cfg_sym}=y$" .config; then
-                  continue
-                fi
-
-                is_allowed=false
-                for keep in "${keep_packages[@]}"; do
-                  if [ "${pkg}" = "${keep}" ]; then
-                    is_allowed=true
-                    break
-                  fi
-                done
-
-                if [ "${is_allowed}" = false ]; then
-                  for allowed in "${allowed_auto_selected_packages[@]}"; do
-                    if [ "${pkg}" = "${allowed}" ]; then
-                      is_allowed=true
-                      break
-                    fi
-                  done
-                fi
-
-                if [ "${is_allowed}" = false ]; then
-                  echo "${pkg}"
-                fi
-              done || true)"
-
-          if [ -n "${extra_morse_selected}" ]; then
-            echo "Unexpected additional Morse packages are selected:"
-            echo "${extra_morse_selected}"
+          morse_pkg_count="$(find package/feeds/morse -mindepth 1 -maxdepth 1 \( -type d -o -type l \) | wc -l | tr -d ' ')"
+          if [ "${morse_pkg_count}" = "0" ]; then
+            echo "Morse feed directory exists but has no package entries"
             exit 1
           fi
 
@@ -186,6 +101,7 @@ jobs:
 
       - name: Prepare build toolchain
         run: |
+          make defconfig
           if [ "${{ steps.host-tools-cache.outputs.cache-hit }}" != "true" ]; then
             make -j"$(nproc)" tools/install
           else
@@ -267,6 +183,7 @@ jobs:
             else
               echo "${target}" | tee -a logs/morse/failed.txt
               echo "Build failed for ${target}, skipping and continuing"
+              echo "Please re-run make with -j1 V=s or V=sc for a higher verbosity level to see what's going on"
             fi
           done
 
