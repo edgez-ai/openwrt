@@ -46,22 +46,11 @@ jobs:
         run: |
           set -euo pipefail
           ./scripts/feeds update morse
-          ./scripts/feeds install -f -p morse -a
+          ./scripts/feeds install -f -p morse hostapd_s1g wpa_supplicant_s1g
 
           if [ ! -d feeds/morse ]; then
             echo "Morse feed source directory missing: feeds/morse"
             exit 1
-          fi
-
-          morse_pkg_count="$(find package/feeds/morse -mindepth 1 -maxdepth 1 \( -type d -o -type l \) 2>/dev/null | wc -l | tr -d ' ')"
-          if [ "${morse_pkg_count}" = "0" ]; then
-            echo "No Morse packages installed yet, installing from Morse feed index"
-            ./scripts/feeds list -r morse \
-              | awk '$1 != "TARGET:" { print $1 }' \
-              | while IFS= read -r pkg; do
-                  [ -n "${pkg}" ] || continue
-                  ./scripts/feeds install -f -p morse "${pkg}"
-                done
           fi
 
           if [ ! -d package/feeds/morse ]; then
@@ -69,9 +58,65 @@ jobs:
             exit 1
           fi
 
-          morse_pkg_count="$(find package/feeds/morse -mindepth 1 -maxdepth 1 \( -type d -o -type l \) | wc -l | tr -d ' ')"
-          if [ "${morse_pkg_count}" = "0" ]; then
-            echo "Morse feed directory exists but has no package entries"
+          for pkg in hostapd_s1g wpa_supplicant_s1g; do
+            if [ ! -e "package/feeds/morse/${pkg}" ]; then
+              echo "Required Morse package missing after install: package/feeds/morse/${pkg}"
+              exit 1
+            fi
+          done
+
+      - name: Limit Morse package selection to requested packages
+        run: |
+          set -euo pipefail
+
+          keep_packages=(
+            hostapd_s1g
+            wpa_supplicant_s1g
+          )
+
+          for pkg in "${keep_packages[@]}"; do
+            cfg_sym="$(echo "${pkg}" | tr '-' '_')"
+            ./scripts/config --enable "PACKAGE_${cfg_sym}"
+          done
+
+          ./scripts/feeds list -r morse \
+            | awk '$1 != "TARGET:" { print $1 }' \
+            | while IFS= read -r pkg; do
+                [ -n "${pkg}" ] || continue
+                skip=false
+                for keep in "${keep_packages[@]}"; do
+                  if [ "${pkg}" = "${keep}" ]; then
+                    skip=true
+                    break
+                  fi
+                done
+                if [ "${skip}" = false ]; then
+                  cfg_sym="$(echo "${pkg}" | tr '-' '_')"
+                  ./scripts/config --disable "PACKAGE_${cfg_sym}" || true
+                fi
+              done
+
+          make defconfig
+
+          for pkg in "${keep_packages[@]}"; do
+            cfg_sym="$(echo "${pkg}" | tr '-' '_')"
+            if ! grep -q "^CONFIG_PACKAGE_${cfg_sym}=y$" .config; then
+              echo "Expected package selection missing in .config: CONFIG_PACKAGE_${cfg_sym}=y"
+              exit 1
+            fi
+          done
+
+          extra_morse_selected="$(./scripts/feeds list -r morse \
+            | awk '$1 != "TARGET:" { print $1 }' \
+            | while IFS= read -r pkg; do
+                cfg_sym="$(echo "${pkg}" | tr '-' '_')"
+                grep -q "^CONFIG_PACKAGE_${cfg_sym}=y$" .config && echo "${pkg}" || true
+              done \
+            | grep -Ev '^(hostapd_s1g|wpa_supplicant_s1g)$' || true)"
+
+          if [ -n "${extra_morse_selected}" ]; then
+            echo "Unexpected additional Morse packages are selected:"
+            echo "${extra_morse_selected}"
             exit 1
           fi
 
@@ -101,7 +146,6 @@ jobs:
 
       - name: Prepare build toolchain
         run: |
-          make defconfig
           if [ "${{ steps.host-tools-cache.outputs.cache-hit }}" != "true" ]; then
             make -j"$(nproc)" tools/install
           else
@@ -178,7 +222,7 @@ jobs:
             log_file="logs/morse/${pkg_name}.log"
             echo "=== Building ${target} ==="
 
-            if make -j"$(nproc)" "${target}" >"${log_file}" 2>&1; then
+            if make -j1 V=sc "${target}" >"${log_file}" 2>&1; then
               echo "${target}" | tee -a logs/morse/succeeded.txt
             else
               echo "${target}" | tee -a logs/morse/failed.txt
