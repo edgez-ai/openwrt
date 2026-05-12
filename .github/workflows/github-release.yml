@@ -74,6 +74,15 @@ jobs:
             wpa_supplicant_s1g
           )
 
+          # These can be selected by board defaults or package dependencies
+          # when building the requested packages.
+          allowed_auto_selected_packages=(
+            libwpa_client_s1g
+            mediamtx
+            morsecli
+            smart_manager
+          )
+
           morse_packages_file="$(mktemp)"
           ./scripts/feeds list -r morse \
             | awk '$1 != "TARGET:" { print $1 }' \
@@ -119,9 +128,31 @@ jobs:
             | awk '$1 != "TARGET:" { print $1 }' \
             | while IFS= read -r pkg; do
                 cfg_sym="$(echo "${pkg}" | tr '-' '_')"
-                grep -q "^CONFIG_PACKAGE_${cfg_sym}=y$" .config && echo "${pkg}" || true
-              done \
-            | grep -Ev '^(hostapd_s1g|wpa_supplicant_s1g)$' || true)"
+                if ! grep -q "^CONFIG_PACKAGE_${cfg_sym}=y$" .config; then
+                  continue
+                fi
+
+                is_allowed=false
+                for keep in "${keep_packages[@]}"; do
+                  if [ "${pkg}" = "${keep}" ]; then
+                    is_allowed=true
+                    break
+                  fi
+                done
+
+                if [ "${is_allowed}" = false ]; then
+                  for allowed in "${allowed_auto_selected_packages[@]}"; do
+                    if [ "${pkg}" = "${allowed}" ]; then
+                      is_allowed=true
+                      break
+                    fi
+                  done
+                fi
+
+                if [ "${is_allowed}" = false ]; then
+                  echo "${pkg}"
+                fi
+              done || true)"
 
           if [ -n "${extra_morse_selected}" ]; then
             echo "Unexpected additional Morse packages are selected:"
