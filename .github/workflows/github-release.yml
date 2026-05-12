@@ -74,29 +74,38 @@ jobs:
             wpa_supplicant_s1g
           )
 
-          for pkg in "${keep_packages[@]}"; do
-            cfg_sym="$(echo "${pkg}" | tr '-' '_')"
-            ./scripts/config --enable "PACKAGE_${cfg_sym}"
-          done
-
+          morse_packages_file="$(mktemp)"
           ./scripts/feeds list -r morse \
             | awk '$1 != "TARGET:" { print $1 }' \
-            | while IFS= read -r pkg; do
-                [ -n "${pkg}" ] || continue
-                skip=false
-                for keep in "${keep_packages[@]}"; do
-                  if [ "${pkg}" = "${keep}" ]; then
-                    skip=true
-                    break
-                  fi
-                done
-                if [ "${skip}" = false ]; then
-                  cfg_sym="$(echo "${pkg}" | tr '-' '_')"
-                  ./scripts/config --disable "PACKAGE_${cfg_sym}" || true
-                fi
-              done
+            | sed '/^$/d' > "${morse_packages_file}"
+
+          while IFS= read -r pkg; do
+            cfg_sym="$(echo "${pkg}" | tr '-' '_')"
+            # Remove any existing assignment before writing a deterministic value below.
+            sed -i "/^CONFIG_PACKAGE_${cfg_sym}=.*/d" .config
+            sed -i "/^# CONFIG_PACKAGE_${cfg_sym} is not set$/d" .config
+          done < "${morse_packages_file}"
+
+          while IFS= read -r pkg; do
+            skip=false
+            for keep in "${keep_packages[@]}"; do
+              if [ "${pkg}" = "${keep}" ]; then
+                skip=true
+                break
+              fi
+            done
+
+            cfg_sym="$(echo "${pkg}" | tr '-' '_')"
+            if [ "${skip}" = true ]; then
+              echo "CONFIG_PACKAGE_${cfg_sym}=y" >> .config
+            else
+              echo "# CONFIG_PACKAGE_${cfg_sym} is not set" >> .config
+            fi
+          done < "${morse_packages_file}"
 
           make defconfig
+
+          rm -f "${morse_packages_file}"
 
           for pkg in "${keep_packages[@]}"; do
             cfg_sym="$(echo "${pkg}" | tr '-' '_')"
